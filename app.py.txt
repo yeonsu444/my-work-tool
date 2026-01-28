@@ -1,0 +1,68 @@
+import streamlit as st
+import pandas as pd
+import re
+
+def convert_to_seconds(time_val):
+    """시간 형식(HH:MM:SS 또는 Excel 숫자)을 초 단위로 변환"""
+    if pd.isna(time_val) or time_val == "":
+        return 0
+    try:
+        if isinstance(time_val, (int, float)): # 엑셀 숫자 형식일 경우
+            return time_val * 86400
+        
+        time_str = str(time_val).strip()
+        parts = list(map(int, re.split('[:.]', time_str)))
+        if len(parts) == 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        elif len(parts) == 2: return parts[0] * 60 + parts[1]
+    except:
+        return 0
+    return 0
+
+def format_seconds_to_time(seconds):
+    """초 단위를 HH:MM:SS 형식으로 변환"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+st.set_page_config(page_title="작업량 합산 툴", layout="wide")
+st.title("📊 작업자별 녹음 시간 합산 툴 (L열 이름 / P열 시간)")
+
+uploaded_files = st.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"], accept_multiple_files=True)
+
+if uploaded_files:
+    results = []
+    for uploaded_file in uploaded_files:
+        try:
+            # P열(15)과 L열(11)만 읽어오기
+            df = pd.read_excel(uploaded_file)
+            
+            # L열(작업자 이름)과 P열(녹음 시간) 추출
+            # iloc는 0부터 시작하므로 L=11, P=15
+            worker_names = df.iloc[:, 11] 
+            time_data = df.iloc[:, 15]
+            
+            # 파일 내 첫 번째 작업자 이름을 대표 이름으로 설정 (혹은 행별 매칭 가능)
+            first_worker = str(worker_names.iloc[0]).strip() if not worker_names.empty else "Unknown"
+            
+            # P열 시간 합산 (공백 제외 마지막 셀까지 자동 계산)
+            total_seconds = time_data.apply(convert_to_seconds).sum()
+            
+            results.append({
+                "파일명": uploaded_file.name,
+                "작업자": first_worker,
+                "총 녹음 시간": format_seconds_to_time(total_seconds),
+                "seconds": total_seconds
+            })
+        except Exception as e:
+            st.error(f"{uploaded_file.name} 오류: {e}")
+
+    if results:
+        final_df = pd.DataFrame(results)
+        st.subheader("📋 파일별 결과")
+        st.dataframe(final_df[["파일명", "작업자", "총 녹음 시간"]], use_container_width=True)
+        
+        st.subheader("👤 작업자별 최종 합계")
+        summary = final_df.groupby("작업자")["seconds"].sum().reset_index()
+        summary["최종 합산 시간"] = summary["seconds"].apply(format_seconds_to_time)
+        st.table(summary[["작업자", "최종 합산 시간"]])
