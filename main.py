@@ -1,0 +1,54 @@
+import streamlit as st
+import pandas as pd
+import re
+
+# 시간 변환 함수
+def convert_to_seconds(time_val):
+    if pd.isna(time_val) or time_val == "":
+        return 0
+    try:
+        if isinstance(time_val, (int, float)):
+            return time_val * 86400
+        time_str = str(time_val).strip()
+        parts = list(map(int, re.split('[:.]', time_str)))
+        if len(parts) == 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        elif len(parts) == 2: return parts[0] * 60 + parts[1]
+    except:
+        return 0
+    return 0
+
+def format_seconds_to_time(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+# UI 구성
+st.set_page_config(page_title="Work Tracker", layout="wide")
+st.title("📊 작업자별 시간 합산 (L열 이름 / P열 시간)")
+
+files = st.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"], accept_multiple_files=True)
+
+if files:
+    results = []
+    for f in files:
+        try:
+            df = pd.read_excel(f)
+            # L열(11) 작업자, P열(15) 시간
+            worker_name = str(df.iloc[0, 11]).strip() if not df.empty else "N/A"
+            total_sec = df.iloc[:, 15].apply(convert_to_seconds).sum()
+            
+            results.append({"File": f.name, "Worker": worker_name, "Seconds": total_sec})
+        except Exception as e:
+            st.error(f"Error in {f.name}: {e}")
+
+    if results:
+        res_df = pd.DataFrame(results)
+        res_df["Total Time"] = res_df["Seconds"].apply(format_seconds_to_time)
+        st.subheader("📋 결과 리스트")
+        st.table(res_df[["File", "Worker", "Total Time"]])
+        
+        st.subheader("👤 작업자별 총합")
+        summary = res_df.groupby("Worker")["Seconds"].sum().reset_index()
+        summary["Grand Total"] = summary["Seconds"].apply(format_seconds_to_time)
+        st.table(summary[["Worker", "Grand Total"]])
