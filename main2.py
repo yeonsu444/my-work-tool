@@ -25,10 +25,10 @@ def format_seconds_to_time(seconds):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 # UI 설정
-st.set_page_config(page_title="Detailed Work Tracker", layout="wide")
-st.title("📋 이벤트별 작업자 상세 분석")
+st.set_page_config(page_title="Grouped Work Tracker", layout="wide")
+st.title("📊 이벤트별 작업자 분석 (병합 효과 적용)")
 
-files = st.file_uploader("엑셀 파일을 업로드하세요 (다중 선택 가능)", type=["xlsx", "xls"], accept_multiple_files=True)
+files = st.file_uploader("엑셀 파일을 업로드하세요", type=["xlsx", "xls"], accept_multiple_files=True)
 
 if files:
     all_data_list = []
@@ -49,38 +49,33 @@ if files:
     if all_data_list:
         master_df = pd.concat(all_data_list, ignore_index=True)
 
-        # 1. 이벤트 + 작업자별 그룹화 (작업자별 건수 및 누적 시간)
+        # 1. 그룹화 데이터 생성
         grouped = master_df.groupby(['Event_ID', 'Worker'])['Seconds'].agg(['count', 'sum']).reset_index()
-        grouped.columns = ['이벤트', '작업자 이름', '작업자별 건수', '작업자별 초']
-
-        # 2. 이벤트별 총계 계산 (이벤트 총 개수 및 총 누적 시간)
         event_total = master_df.groupby('Event_ID')['Seconds'].agg(['count', 'sum']).reset_index()
-        event_total.columns = ['이벤트', '이벤트 총 개수', '이벤트 총 초']
+        
+        final_df = pd.merge(grouped, event_total, on='Event_ID', suffixes=('_worker', '_event'))
 
-        # 3. 데이터 병합 (이벤트 전체 정보 + 작업자 상세 정보)
-        final_df = pd.merge(grouped, event_total, on='이벤트')
+        # 2. 포맷 정리
+        final_df['이벤트 총 누적시간'] = final_df['sum_event'].apply(format_seconds_to_time)
+        final_df['작업자별 누적 시간'] = final_df['sum_worker'].apply(format_seconds_to_time)
+        
+        result = final_df[[
+            'Event_ID', 'count_event', '이벤트 총 누적시간', 
+            'Worker', 'count_worker', '작업자별 누적 시간'
+        ]].copy()
+        
+        result.columns = ['이벤트', '이벤트 총 개수', '이벤트 총 누적시간', '작업자 이름', '작업자별 건수', '작업자별 누적 시간']
 
-        # 4. 시간 포맷 변환 및 컬럼 순서 정리
-        final_df['이벤트 총 누적시간'] = final_df['이벤트 총 초'].apply(format_seconds_to_time)
-        final_df['작업자별 누적 시간'] = final_df['작업자별 초'].apply(format_seconds_to_time)
+        # 3. 시각적 병합 처리 (중복값 제거)
+        # 같은 이벤트 내에서 첫 번째 행이 아니면 값을 비움
+        result.loc[result['이벤트'].duplicated(), ['이벤트', '이벤트 총 개수', '이벤트 총 누적시간']] = ""
 
-        # 최종 컬럼 순서 재배치
-        result_display = final_df[[
-            '이벤트', '이벤트 총 개수', '이벤트 총 누적시간', 
-            '작업자 이름', '작업자별 건수', '작업자별 누적 시간'
-        ]]
+        st.subheader("🚀 분석 결과 (중복 정보 생략)")
+        # 표 형식으로 출력
+        st.table(result)
 
-        # 결과 출력
-        st.subheader("🚀 통합 분석 결과")
-        st.dataframe(result_display, use_container_width=True) # 테이블보다 스크롤/정렬이 편한 dataframe 사용
-
-        # 엑셀 다운로드 버튼 추가
-        csv = result_display.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📊 결과 CSV 다운로드",
-            data=csv,
-            file_name="Work_Analysis_Result.csv",
-            mime="text/csv",
-        )
+        # 다운로드용 데이터는 병합 처리 전의 원본(final_df 기반)을 추천
+        csv = final_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📊 전체 데이터 다운로드(CSV)", data=csv, file_name="total_data.csv")
     else:
-        st.warning("데이터를 읽어올 수 없습니다. 파일의 열(B, L, P) 위치를 확인해주세요.")
+        st.warning("분석할 데이터가 없습니다.")
